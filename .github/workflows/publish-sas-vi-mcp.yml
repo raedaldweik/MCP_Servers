@@ -1,0 +1,90 @@
+# Builds the SAS Visual Investigator MCP server container and pushes it to
+# GitHub Container Registry as ghcr.io/raedaldweik/sas-vi-mcp — the image the
+# SAS Retrieval Agent Manager (RAM) Container MCP Server template pulls.
+#
+# Runs on pushes to main that touch the server, on pushes to the setup branch
+# (so the image exists before the branch is merged), and on manual dispatch.
+#
+# NOTE: the first push creates the GHCR package as PRIVATE. Make it pullable
+# by RAM once: GitHub profile -> Packages -> sas-vi-mcp -> Package settings ->
+# match the visibility/access of your other MCP packages.
+name: Publish SAS VI MCP to GHCR
+
+on:
+  push:
+    branches:
+      - main
+      - claude/sas-vi-mcp-setup-25l82s
+    paths:
+      - 'SAS VI MCP/**'
+      - '.github/workflows/publish-sas-vi-mcp.yml'
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/sas-vi-mcp
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Sync dependencies
+        working-directory: SAS VI MCP
+        run: uv sync --dev
+
+      - name: Lint (ruff)
+        working-directory: SAS VI MCP
+        run: uv run ruff check .
+
+      - name: Unit tests
+        working-directory: SAS VI MCP
+        run: uv run pytest -q
+
+  build-and-push:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=sha,format=short,prefix=sha-
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: "./SAS VI MCP"
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
