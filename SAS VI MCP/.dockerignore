@@ -7,4 +7,3 @@ tests
 api-specs
 .pytest_cache
 .ruff_cache
-README.md
