@@ -6,7 +6,8 @@ same recipe as the SAS Viya MCP's examples/get_refresh_token.py.
     uv run python examples/get_refresh_token.py --insecure # RACE/Engage images, quick tunnels
 
 Reads VI_ENDPOINT (or VIYA_ENDPOINT), VI_CLIENT_ID (or CLIENT_ID; default
-sas.cli) and VI_SSL_VERIFY (or SSL_VERIFY) from .env. See
+sas-mcp, redirecting to http://localhost:8134/auth/callback exactly like the
+SAS Viya MCP) and VI_SSL_VERIFY (or SSL_VERIFY) from .env. See
 `vi-get-refresh-token --help` for all options.
 """
 

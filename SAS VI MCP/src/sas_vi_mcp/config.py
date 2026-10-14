@@ -62,12 +62,14 @@ def _int(name: str, default: int) -> int:
 VI_ENDPOINT = _env("VI_ENDPOINT", "VIYA_ENDPOINT").rstrip("/")
 
 # OAuth client used against {VI_ENDPOINT}/SASLogon/oauth/token.
-# "sas.cli" exists out of the box on every Viya and supports both the
-# refresh_token grant (the token `vi-get-refresh-token` prints) and the
-# password grant (RACE demo accounts). A refresh token only works with the
-# client it was issued to, so VI_CLIENT_ID must match the client used when
-# the token was obtained (e.g. "sas-vi-mcp" after `vi-register-client`).
-VI_CLIENT_ID = _env("VI_CLIENT_ID", "CLIENT_ID", default="sas.cli")
+# "sas-mcp" is the client the SAS Viya MCP registers (register_mcp_client.py:
+# authorization_code + refresh_token grants, redirect
+# http://localhost:8134/auth/callback, one-year refresh validity);
+# `vi-register-client` creates the identical client on the VI environment.
+# A refresh token only works with the client it was issued to, so this must
+# match the client `vi-get-refresh-token` used. The built-in "sas.cli" also
+# works (refresh_token and password grants, no registration needed).
+VI_CLIENT_ID = _env("VI_CLIENT_ID", "CLIENT_ID", default="sas-mcp")
 VI_CLIENT_SECRET = _env("VI_CLIENT_SECRET", "CLIENT_SECRET")
 
 # Preferred credential: a refresh token obtained once with
@@ -76,7 +78,8 @@ VI_CLIENT_SECRET = _env("VI_CLIENT_SECRET", "CLIENT_SECRET")
 VI_REFRESH_TOKEN = _env("VI_REFRESH_TOKEN", "VIYA_REFRESH_TOKEN")
 
 # Fallback credential: the password grant, only for accounts SAS Logon
-# authenticates directly (local/LDAP users on a RACE image).
+# authenticates directly (local/LDAP users on a RACE image) and only with a
+# client that allows it (set VI_CLIENT_ID=sas.cli; sas-mcp does not).
 VI_USERNAME = _env("VI_USERNAME", "VIYA_USERNAME")
 VI_PASSWORD = _env("VI_PASSWORD", "VIYA_PASSWORD")
 

@@ -14,6 +14,8 @@ import pytest
 from sas_vi_mcp import oauth_setup
 from sas_vi_mcp.oauth_setup import (
     CALLBACK_PATH,
+    DEFAULT_CALLBACK_PORT,
+    DEFAULT_REGISTERED_CLIENT_ID,
     OOB_REDIRECT_URI,
     OAuthSetupError,
     authorize_url,
@@ -24,6 +26,7 @@ from sas_vi_mcp.oauth_setup import (
     pkce_pair,
     register_client,
     registration_payload,
+    resolve_redirect_uri,
     token_request,
 )
 
@@ -69,6 +72,27 @@ def test_authorize_url_with_localhost_callback():
                         f"http://localhost:8141{CALLBACK_PATH}")
     q = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
     assert q["redirect_uri"] == ["http://localhost:8141/auth/callback"]
+
+
+def test_defaults_match_the_sas_viya_mcp_registration():
+    assert DEFAULT_REGISTERED_CLIENT_ID == "sas-mcp"
+    assert DEFAULT_CALLBACK_PORT == 8134
+
+
+def test_resolve_redirect_uri_registered_client_uses_localhost_8134():
+    assert (resolve_redirect_uri("sas-mcp", None, False)
+            == "http://localhost:8134/auth/callback")
+
+
+def test_resolve_redirect_uri_builtin_clients_use_code_on_page():
+    assert resolve_redirect_uri("sas.cli", None, False) is None
+    assert resolve_redirect_uri("vscode", None, False) is None
+
+
+def test_resolve_redirect_uri_explicit_flags_win():
+    assert (resolve_redirect_uri("sas.cli", 9000, False)
+            == "http://localhost:9000/auth/callback")
+    assert resolve_redirect_uri("sas-mcp", None, True) is None
 
 
 def test_token_request_public_client_has_no_basic_auth():
@@ -234,10 +258,11 @@ def test_get_refresh_token_cli_two_step_flow(monkeypatch, tmp_path, capsys):
 
     rc = oauth_setup.get_refresh_token_main(
         ["--endpoint", "https://vi.example.com/", "--client-id", "sas.cli",
-         "--insecure"])
+         "--insecure"])  # built-in client -> code-on-page, no redirect_uri
     assert rc == 0
     out = capsys.readouterr().out
     assert "https://vi.example.com/SASLogon/oauth/authorize?" in out
+    assert "redirect_uri" not in out
     assert "--code <CODE>" in out
     state = json.loads((tmp_path / "state.json").read_text())
     assert state["client_id"] == "sas.cli"
@@ -261,6 +286,44 @@ def test_get_refresh_token_cli_two_step_flow(monkeypatch, tmp_path, capsys):
     assert "VI_REFRESH_TOKEN=" in out
     assert "valid until 2030-03-17" in out
     assert not (tmp_path / "state.json").exists()
+
+
+def test_get_refresh_token_cli_sas_mcp_uses_localhost_callback(monkeypatch, capsys):
+    """The default sas-mcp client signs in through the localhost:8134
+    redirect, exactly like the SAS Viya MCP's get_refresh_token.py."""
+    seen = {}
+    monkeypatch.setattr(oauth_setup.webbrowser, "open", lambda url: True)
+
+    def fake_wait(port, timeout):
+        seen["port"] = port
+        state = urllib.parse.parse_qs(
+            urllib.parse.urlparse(seen["url"]).query)["state"][0]
+        return {"code": ["C0DE"], "state": [state]}
+
+    monkeypatch.setattr(oauth_setup, "await_localhost_redirect", fake_wait)
+    real_authorize = oauth_setup.authorize_url
+
+    def spy_authorize(*a, **k):
+        seen["url"] = real_authorize(*a, **k)
+        return seen["url"]
+
+    monkeypatch.setattr(oauth_setup, "authorize_url", spy_authorize)
+
+    def handler(request: httpx.Request):
+        seen["form"] = urllib.parse.parse_qs(request.content.decode())
+        return httpx.Response(200, json={"access_token": "AT",
+                                         "refresh_token": "RT"})
+
+    _mock_logon(monkeypatch, handler)
+    rc = oauth_setup.get_refresh_token_main(
+        ["--endpoint", "https://vi.example.com", "--client-id", "sas-mcp"])
+    assert rc == 0
+    assert seen["port"] == 8134
+    q = urllib.parse.parse_qs(urllib.parse.urlparse(seen["url"]).query)
+    assert q["redirect_uri"] == ["http://localhost:8134/auth/callback"]
+    assert seen["form"]["redirect_uri"] == ["http://localhost:8134/auth/callback"]
+    assert seen["form"]["code"] == ["C0DE"]
+    assert "VI_CLIENT_ID=sas-mcp" in capsys.readouterr().out
 
 
 def test_get_refresh_token_cli_requires_endpoint(monkeypatch):

@@ -12,18 +12,23 @@ Two console scripts (also runnable as ``examples/*.py``):
     password afterwards. Works for SSO/federated identities (where the
     password grant cannot) and for local accounts alike.
 
-    By default no redirect URI is sent, so SAS Logon shows the
-    authorization code on a results page for you to paste back — this works
-    with the built-in ``sas.cli`` client and needs no admin step and no CSP
-    change. With ``--callback-port`` the browser is redirected to
-    ``http://localhost:<port>/auth/callback`` instead, for clients registered
-    with that redirect URI (e.g. the ``sas-mcp`` client of the SAS Viya MCP).
+    With the default ``sas-mcp`` client (the one the SAS Viya MCP registers)
+    the browser is redirected to ``http://localhost:8134/auth/callback``,
+    exactly like that repo's ``get_refresh_token.py``. With a built-in client
+    (``--client-id sas.cli`` or ``vscode``, no registration needed) no
+    redirect URI is sent and SAS Logon shows the authorization code on a
+    results page for you to paste back; ``--code-on-page`` forces that mode
+    and ``--callback-port`` forces the redirect mode.
 
 ``vi-register-client``
-    (Admin, optional.) Register a dedicated OAuth client with a long
-    ``refresh-token-validity`` (a year by default) so the one-time login is
-    rarely repeated. Needs an account SAS Logon can authenticate directly
-    (``sasboot`` or a local admin) or an existing admin bearer token.
+    (Admin, once per Viya deployment.) Register the ``sas-mcp`` client on
+    the VI environment with the same definition as the SAS Viya MCP's
+    ``register_mcp_client.py`` — authorization_code + refresh_token grants,
+    the localhost:8134 redirect URI and a one-year refresh-token validity —
+    so the one-time login is rarely repeated. Skip it when VI runs on the
+    same Viya where ``sas-mcp`` already exists. Needs an account SAS Logon
+    can authenticate directly (``sasboot`` or a local admin) or an existing
+    admin bearer token.
 """
 
 from __future__ import annotations
@@ -50,7 +55,13 @@ from . import config
 
 OOB_REDIRECT_URI = "urn:ietf:wg:oauth:2.0:oob"
 CALLBACK_PATH = "/auth/callback"
-DEFAULT_REGISTERED_CLIENT_ID = "sas-vi-mcp"
+# Same client id and redirect port as the SAS Viya MCP's register_mcp_client.py,
+# so the client definition is identical on both environments.
+DEFAULT_REGISTERED_CLIENT_ID = "sas-mcp"
+DEFAULT_CALLBACK_PORT = 8134
+# Clients that ship with Viya and support the code-on-page flow (no
+# redirect URI registered for localhost).
+BUILTIN_CLIENTS = frozenset({"sas.cli", "vscode"})
 # PKCE state for the two-step (non-interactive terminal) variant of
 # vi-get-refresh-token, mirroring the SAS Viya MCP's sas-mcp-login helper.
 STATE_PATH = Path.home() / ".sas-vi-mcp" / "login-state.json"
@@ -90,6 +101,21 @@ def authorize_url(endpoint: str, client_id: str, challenge: str, state: str,
         params["redirect_uri"] = redirect_uri
     return (f"{endpoint.rstrip('/')}/SASLogon/oauth/authorize?"
             + urllib.parse.urlencode(params))
+
+
+def resolve_redirect_uri(client_id: str, callback_port: int | None,
+                         code_on_page: bool) -> str | None:
+    """Pick the sign-in mode: ``None`` means code-on-page (no redirect URI);
+    otherwise the localhost callback URI. Explicit flags win; a built-in
+    client defaults to code-on-page, a registered one (sas-mcp) to the
+    localhost:8134 callback it was registered with."""
+    if code_on_page:
+        return None
+    if callback_port:
+        return f"http://localhost:{callback_port}{CALLBACK_PATH}"
+    if client_id in BUILTIN_CLIENTS:
+        return None
+    return f"http://localhost:{DEFAULT_CALLBACK_PORT}{CALLBACK_PATH}"
 
 
 def token_request(grant: dict, client_id: str, client_secret: str = ""
@@ -279,8 +305,8 @@ def await_localhost_redirect(port: int, timeout: int = 300) -> dict:
                 f"Timed out after {timeout}s waiting for the browser redirect. "
                 "If SAS Logon showed the login page but never redirected to "
                 "localhost, its form-action Content-Security-Policy is "
-                "blocking it — re-run without --callback-port to use the "
-                "code-on-page flow instead.")
+                "blocking it — re-run with --code-on-page (works with a client "
+                "registered by vi-register-client, or with sas.cli/vscode).")
     finally:
         server.shutdown()
         thread.join()
@@ -349,17 +375,19 @@ def get_refresh_token_main(argv: list[str] | None = None) -> int:
                         help="VI base URL (default: VI_ENDPOINT / VIYA_ENDPOINT)")
     parser.add_argument("--client-id", default=config.VI_CLIENT_ID,
                         help="OAuth client to sign in with (default: VI_CLIENT_ID "
-                             "/ CLIENT_ID, else 'sas.cli'). The server must run "
+                             "/ CLIENT_ID, else 'sas-mcp'). The server must run "
                              "with the same VI_CLIENT_ID.")
     parser.add_argument("--client-secret", default=config.VI_CLIENT_SECRET,
                         help="Only for a confidential client (default: "
                              "VI_CLIENT_SECRET / CLIENT_SECRET)")
-    parser.add_argument("--callback-port", type=int, default=0,
-                        help="Redirect the browser to http://localhost:PORT"
-                             f"{CALLBACK_PATH} instead of showing the code on "
-                             "a page. The client must have that redirect URI "
-                             "registered (vi-register-client does; the SAS "
-                             "Viya MCP's 'sas-mcp' client uses port 8134).")
+    parser.add_argument("--callback-port", type=int, default=None,
+                        help="Port of the localhost redirect URI the client "
+                             f"was registered with (default {DEFAULT_CALLBACK_PORT} "
+                             "for sas-mcp and other registered clients)")
+    parser.add_argument("--code-on-page", action="store_true",
+                        help="Send no redirect URI; SAS Logon shows the code on "
+                             "a page to paste back (default for the built-in "
+                             "sas.cli / vscode clients)")
     parser.add_argument("--code", default="",
                         help="Finish a login started in a non-interactive "
                              "terminal: pass the code SAS Logon displayed.")
@@ -394,8 +422,10 @@ def get_refresh_token_main(argv: list[str] | None = None) -> int:
 
         verifier, challenge = pkce_pair()
         state_token = secrets.token_urlsafe(24)
-        redirect_uri = (f"http://localhost:{args.callback_port}{CALLBACK_PATH}"
-                        if args.callback_port else None)
+        redirect_uri = resolve_redirect_uri(args.client_id, args.callback_port,
+                                            args.code_on_page)
+        callback_port = (urllib.parse.urlparse(redirect_uri).port
+                         if redirect_uri else 0)
         url = authorize_url(endpoint, args.client_id, challenge, state_token,
                             redirect_uri)
 
@@ -415,7 +445,7 @@ def get_refresh_token_main(argv: list[str] | None = None) -> int:
         if redirect_uri:
             print("Step 2 — waiting for SAS Logon to redirect the browser back "
                   f"to {redirect_uri} (up to {args.timeout}s)...")
-            query = await_localhost_redirect(args.callback_port, args.timeout)
+            query = await_localhost_redirect(callback_port, args.timeout)
             if "error" in query:
                 raise OAuthSetupError(
                     "Authorization failed: "
@@ -460,23 +490,25 @@ def get_refresh_token_main(argv: list[str] | None = None) -> int:
 def register_client_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="vi-register-client",
-        description=("Register a dedicated OAuth client on the Visual "
-                     "Investigator environment with a long refresh-token "
-                     "validity (admin, one time)."))
+        description=("Register the sas-mcp OAuth client on the Visual "
+                     "Investigator environment — same definition as the SAS "
+                     "Viya MCP's register_mcp_client.py, with a long "
+                     "refresh-token validity (admin, once per deployment)."))
     parser.add_argument("--endpoint", default=config.VI_ENDPOINT,
                         help="VI base URL (default: VI_ENDPOINT / VIYA_ENDPOINT)")
     parser.add_argument("--client-id", default=DEFAULT_REGISTERED_CLIENT_ID,
                         help=f"Client id to create (default: "
-                             f"{DEFAULT_REGISTERED_CLIENT_ID})")
+                             f"{DEFAULT_REGISTERED_CLIENT_ID}, like the SAS Viya MCP)")
     parser.add_argument("--client-secret", default="",
                         help="Make it a confidential client with this secret "
                              "(default: public/PKCE client, no secret)")
     parser.add_argument("--validity-days", type=int, default=365,
                         help="refresh-token-validity in days (default 365). "
                              "SAS Logon may cap this globally.")
-    parser.add_argument("--callback-port", type=int, default=config.HOST_PORT,
-                        help="Port for the optional localhost redirect URI "
-                             f"(default {config.HOST_PORT})")
+    parser.add_argument("--callback-port", type=int, default=DEFAULT_CALLBACK_PORT,
+                        help="Port of the localhost redirect URI (default "
+                             f"{DEFAULT_CALLBACK_PORT}, the same as the SAS Viya "
+                             "MCP's registration)")
     parser.add_argument("--admin-token", default=os.getenv("VI_ADMIN_TOKEN", ""),
                         help="Existing admin bearer token (default: "
                              "VI_ADMIN_TOKEN). If omitted you are prompted for "
@@ -516,7 +548,9 @@ def register_client_main(argv: list[str] | None = None) -> int:
         print("Next: obtain the refresh token with this client, then set")
         print(f"VI_CLIENT_ID={args.client_id} alongside it in the RAM template:")
         print()
-        print(f"    vi-get-refresh-token --client-id {args.client_id}"
+        port_flag = (f" --callback-port {args.callback_port}"
+                     if args.callback_port != DEFAULT_CALLBACK_PORT else "")
+        print(f"    vi-get-refresh-token --client-id {args.client_id}{port_flag}"
               f"{' --insecure' if args.insecure else ''}")
         return 0
     except OAuthSetupError as exc:

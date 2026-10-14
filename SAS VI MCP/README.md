@@ -76,10 +76,35 @@ a local one or comes through SSO/Entra/Okta (where the password grant cannot
 be used), so it is the right choice for a RACE/Engage image as much as for a
 customer environment.
 
-Run the helper from a checkout of this folder (needs `uv`) …
+It uses the **same `sas-mcp` OAuth client as the SAS Viya MCP** (grants
+`authorization_code` + `refresh_token`, redirect
+`http://localhost:8134/auth/callback`, one-year refresh validity).
+
+**1a. Make sure `sas-mcp` exists on the VI environment.** An OAuth client
+lives in one Viya deployment's SAS Logon:
+
+- VI runs on the **same Viya** your SAS Viya MCP uses → it is already
+  registered, skip to 1b. (Because it is the same SAS Logon and the same
+  client, the SAS MCP template's `VIYA_ENDPOINT` / `VIYA_REFRESH_TOKEN` /
+  `CLIENT_ID=sas-mcp` values also work as-is on the VI template — the server
+  accepts those names. A separate token from 1b is still cleaner: the two
+  tools then expire and get rotated independently.)
+- VI is a **different Viya** (e.g. an Engage image) → register it once, as
+  an administrator, exactly as you ran `register_mcp_client.py` before:
+
+  ```sh
+  cd "SAS VI MCP" && uv sync
+  uv run vi-register-client --endpoint https://<vi-host> --insecure
+  # or, SAS-MCP style:  uv run python examples/register_vi_client.py --insecure
+  ```
+
+  It prompts for an admin that SAS Logon authenticates directly (`sasboot`
+  or a local admin); pass `--admin-token` for an SSO admin. It replaces any
+  existing `sas-mcp` client and prints the registration it verified.
+
+**1b. Sign in once and capture the token:**
 
 ```sh
-uv sync
 uv run vi-get-refresh-token --endpoint https://<vi-host> --insecure
 # or, SAS-MCP style:  uv run python examples/get_refresh_token.py --insecure
 ```
@@ -87,52 +112,39 @@ uv run vi-get-refresh-token --endpoint https://<vi-host> --insecure
 … or straight from the image, with no Python on your machine:
 
 ```sh
-docker run --rm -it ghcr.io/raedaldweik/sas-vi-mcp:ram \
+docker run --rm -it -p 8134:8134 ghcr.io/raedaldweik/sas-vi-mcp:ram \
   vi-get-refresh-token --endpoint https://<vi-host> --insecure --no-browser
 ```
 
-What happens:
+What happens — the same flow as the SAS Viya MCP's `get_refresh_token.py`:
 
 1. It prints a SAS Logon URL (and opens it). Sign in as the VI user the agent
    should act as — a user with investigator rights.
-2. SAS Logon shows an **authorization code** on a results page. Paste it into
-   the terminal.
+2. SAS Logon redirects the browser to `http://localhost:8134/auth/callback`,
+   where the helper is listening.
 3. The helper prints the three lines for RAM, plus the token's expiry date:
 
    ```
    VI_ENDPOINT=https://<vi-host>
-   VI_CLIENT_ID=sas.cli
+   VI_CLIENT_ID=sas-mcp
    VI_REFRESH_TOKEN=eyJ...
    ```
 
 `--insecure` is for RACE/Engage self-signed certificates and cloudflared quick
 tunnels (it maps to `VI_SSL_VERIFY=false` in the container). `--endpoint` can
 be omitted when `VI_ENDPOINT` (or `VIYA_ENDPOINT`) is set in a `.env` — see
-[`.env.sample`](.env.sample). If the terminal cannot prompt, the helper saves
-its state and tells you to finish with `vi-get-refresh-token --code <CODE>`.
+[`.env.sample`](.env.sample). Port 8134 is only the local listener for this
+one-time sign-in; it is unrelated to the container's port 8141.
 
-**Which OAuth client?** By default the built-in `sas.cli` client is used, so
-nothing has to be registered and no SAS Logon settings change. Two
-alternatives:
-
-- **A dedicated client with a one-year refresh-token validity** (recommended
-  for a long-running demo; needs a SAS administrator once):
-
-  ```sh
-  uv run vi-register-client --endpoint https://<vi-host> --insecure   # prompts for sasboot/admin
-  uv run vi-get-refresh-token --endpoint https://<vi-host> --insecure --client-id sas-vi-mcp
-  ```
-
-  Then set `VI_CLIENT_ID=sas-vi-mcp` in RAM. (`examples/register_vi_client.py`
-  is the SAS-MCP-style wrapper; pass `--admin-token` instead of a password for
-  an SSO admin, and `--validity-days` to change the default 365.)
-- **The SAS Viya MCP's `sas-mcp` client**, if VI runs on the same Viya where
-  you already registered it: `vi-get-refresh-token --client-id sas-mcp
-  --callback-port 8134` (that client only has the localhost redirect URI), and
-  set `VI_CLIENT_ID=sas-mcp` in RAM.
+**No admin available?** Use the built-in `sas.cli` client instead, which needs
+no registration: `vi-get-refresh-token --client-id sas.cli --insecure`. SAS
+Logon then shows the authorization code on a page for you to paste back (no
+localhost redirect, so no CSP concern). Set `VI_CLIENT_ID=sas.cli` in RAM.
+Its refresh-token validity is whatever that deployment configured for
+`sas.cli`; the helper prints the expiry either way.
 
 A refresh token only works with the client it was issued to, so
-`VI_CLIENT_ID` in RAM must always match the `--client-id` you used here.
+`VI_CLIENT_ID` in RAM must always match the client used here.
 
 ## Step 2 — Reach the VI image from RAM (cloudflared)
 
@@ -182,7 +194,7 @@ SAS Viya MCP:
 |------|---------------|--------|
 | `VI_ENDPOINT` | `https://<your-tunnel>.trycloudflare.com` | ✅ |
 | `VI_REFRESH_TOKEN` | the token from Step 1 | ✅ |
-| `VI_CLIENT_ID` | `sas.cli` (or `sas-vi-mcp` / `sas-mcp` — whatever Step 1 used) | |
+| `VI_CLIENT_ID` | `sas-mcp` (or `sas.cli` if Step 1 used it) | |
 | `VI_SSL_VERIFY` | `false` (RACE/Engage / quick tunnel TLS) | |
 | `VI_ALLOW_ACTIONS` | `false` (set `true` only to demo dispositions/workflow actions) | |
 | `VI_USE_CASE` | one line describing the deployment, e.g. `Procurement integrity monitoring...` | |
@@ -193,8 +205,9 @@ copy that template's table and just swap the values (`VI_*` wins when both
 are set).
 
 Password-grant alternative for a local (non-SSO) account: set `VI_USERNAME`
-and `VI_PASSWORD` (secret ✅) instead of `VI_REFRESH_TOKEN`; `sas.cli`
-supports it on RACE images. A refresh token, when present, always wins.
+and `VI_PASSWORD` (secret ✅) instead of `VI_REFRESH_TOKEN`, with
+`VI_CLIENT_ID=sas.cli` (the `sas-mcp` client has no password grant). A
+refresh token, when present, always wins.
 
 Optional extras: `MCP_API_KEY` (protect `/mcp` with a static key),
 `VI_CLIENT_SECRET` (confidential clients only), `VI_MAX_CHARS` (response size
@@ -207,12 +220,12 @@ cap, default 16000), `VI_TIMEOUT` (seconds, default 120), `HOST_PORT`
 ```bash
 docker run --rm -p 8141:8141 \
   -e VI_ENDPOINT=https://<tunnel>.trycloudflare.com \
-  -e VI_REFRESH_TOKEN=... -e VI_CLIENT_ID=sas.cli -e VI_SSL_VERIFY=false \
+  -e VI_REFRESH_TOKEN=... -e VI_CLIENT_ID=sas-mcp -e VI_SSL_VERIFY=false \
   ghcr.io/raedaldweik/sas-vi-mcp:ram
 
 curl -s localhost:8141/health
 # {"status":"healthy","service":"sas-vi-mcp","vi_endpoint_configured":true,
-#  "credentials_configured":true,"auth_mode":"refresh_token","client_id":"sas.cli",...}
+#  "credentials_configured":true,"auth_mode":"refresh_token","client_id":"sas-mcp",...}
 ```
 
 Then in RAM chat, ask the agent to run `check_vi_connection` — it reports
@@ -225,9 +238,10 @@ the grant in use, per-service reachability, and pinpoints config problems
 |---|---|
 | `sign-in failed (400/401) using the refresh_token grant` | The token expired or was revoked, or `VI_CLIENT_ID` is not the client it was issued to. Re-run `vi-get-refresh-token`, update `VI_REFRESH_TOKEN` (and `VI_CLIENT_ID`) in the template, restart the tool. The helper prints each token's expiry date. |
 | `Could not reach SAS Logon at …` | The cloudflared quick tunnel restarted with a new URL — update `VI_ENDPOINT`. |
-| `SAS Logon returned no refresh token for client …` | That client lacks the `refresh_token` grant. Use `sas.cli`, or register one with `vi-register-client`. |
-| SAS Logon rejects the sign-in URL for `sas.cli` (`unauthorized_client` / `invalid_client`) | That deployment's `sas.cli` has no authorization-code grant. Use the other built-in client: `--client-id vscode` (Viya 2022.11+), and set `VI_CLIENT_ID=vscode` in RAM — or register a dedicated client. |
-| `--callback-port` login never redirects back | SAS Logon's `form-action` Content-Security-Policy blocks localhost redirects. Drop `--callback-port` and use the default code-on-page flow (no CSP change needed). |
+| Sign-in URL rejected with `invalid_client` / `unauthorized_client` for `sas-mcp` | The client is not registered on *this* Viya (VI is a different deployment from your SAS MCP's). Run `vi-register-client` once as an admin (Step 1a). |
+| `SAS Logon returned no refresh token for client …` | That client lacks the `refresh_token` grant. Re-register it with `vi-register-client`, or use `--client-id sas.cli`. |
+| Browser signs in but never redirects back to `localhost:8134` | SAS Logon's `form-action` Content-Security-Policy blocks localhost redirects (same fix as for the SAS Viya MCP: remove `form-action` from SAS Logon Manager's CSP for the one-time sign-in). Or avoid the redirect: `vi-get-refresh-token --code-on-page` works with a client registered by `vi-register-client` and with `sas.cli`. |
+| `sas.cli` refuses the sign-in URL | That deployment's `sas.cli` has no authorization-code grant. Use the other built-in client `--client-id vscode` (Viya 2022.11+) and set `VI_CLIENT_ID=vscode`, or register `sas-mcp`. |
 | `vi-register-client`: admin sign-in fails | The prompt uses the password grant, which SSO accounts cannot use. Pass `--admin-token` (a bearer token from `sas-viya auth` or the environment's Consul token). |
 | `sign-in failed … using the password grant` | SSO/federated users cannot use `VI_USERNAME`/`VI_PASSWORD`; switch to a refresh token. |
 

@@ -46,7 +46,7 @@ def test_vi_names_win_over_aliases(monkeypatch):
 def test_defaults_and_password_mode(monkeypatch):
     cfg = _reload(monkeypatch, VI_ENDPOINT="https://vi", VI_USERNAME="u",
                   VI_PASSWORD="p")
-    assert cfg.VI_CLIENT_ID == "sas.cli"
+    assert cfg.VI_CLIENT_ID == "sas-mcp"  # the SAS Viya MCP's client
     assert cfg.VI_SSL_VERIFY is True
     assert cfg.auth_mode() == "password"
 
