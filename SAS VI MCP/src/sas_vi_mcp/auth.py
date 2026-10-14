@@ -70,8 +70,9 @@ class SASLogonAuth:
         if grant is None:
             raise AuthenticationError(
                 "No Visual Investigator credentials configured. Set "
-                "VI_REFRESH_TOKEN (required for SSO/federated identities) "
-                "or VI_USERNAME and VI_PASSWORD.")
+                "VI_REFRESH_TOKEN (obtain it once with `vi-get-refresh-token`; "
+                "required for SSO/federated identities) or VI_USERNAME and "
+                "VI_PASSWORD.")
 
         token_url = f"{config.VI_ENDPOINT}/SASLogon/oauth/token"
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
@@ -95,10 +96,21 @@ class SASLogonAuth:
                 "running and VI_ENDPOINT matches its current URL.") from exc
 
         if resp.status_code >= 400:
+            if grant["grant_type"] == "refresh_token":
+                hint = (
+                    "The refresh token was rejected: it has expired or been "
+                    f"revoked, or VI_CLIENT_ID ('{config.VI_CLIENT_ID}') is not "
+                    "the client it was issued to. Run `vi-get-refresh-token` "
+                    "again, update VI_REFRESH_TOKEN (and VI_CLIENT_ID) in the "
+                    "RAM template's environment variables, and restart the tool.")
+            else:
+                hint = (
+                    "Check VI_USERNAME, VI_PASSWORD and VI_CLIENT_ID. SSO/"
+                    "federated accounts cannot use the password grant — use "
+                    "VI_REFRESH_TOKEN from `vi-get-refresh-token` instead.")
             raise AuthenticationError(
-                f"Visual Investigator sign-in failed ({resp.status_code}): "
-                f"{resp.text[:300]}. Check VI_CLIENT_ID and the credentials; "
-                "a refresh token must have been issued to the same client.")
+                f"Visual Investigator sign-in failed ({resp.status_code}) using "
+                f"the {grant['grant_type']} grant: {resp.text[:300]}. {hint}")
 
         body = resp.json()
         self._token = body["access_token"]

@@ -1,6 +1,6 @@
 [project]
 name = "sas-vi-mcp"
-version = "1.0.0"
+version = "1.1.0"
 description = "SAS Visual Investigator MCP server for SAS Retrieval Agent Manager (alerts, entities, search, network, workflow)"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -14,6 +14,9 @@ dependencies = [
 [project.scripts]
 app-http-direct = "sas_vi_mcp.http_server:main"
 app-stdio = "sas_vi_mcp.stdio_server:main"
+# One-time setup helpers for a headless (RAM) deployment — see README.
+vi-get-refresh-token = "sas_vi_mcp.oauth_setup:get_refresh_token_main"
+vi-register-client = "sas_vi_mcp.oauth_setup:register_client_main"
 
 [build-system]
 requires = ["uv_build>=0.8.22,<0.9.0"]

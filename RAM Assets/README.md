@@ -22,7 +22,7 @@ folder contains:
 
 | Folder | MCP tool in RAM | Container image |
 |---|---|---|
-| `SAS VI MCP` | SAS_VI_MCP (this repo) | `ghcr.io/raedaldweik/sas-vi-mcp:latest`, port 8141 |
+| `SAS VI MCP` | SAS_VI_MCP (this repo) | `ghcr.io/raedaldweik/sas-vi-mcp:ram`, port 8141 |
 | `SAS Viya MCP` | SAS_MCP | `ghcr.io/raedaldweik/sas-mcp-server:ram`, port 8134 |
 | `SAS Use Case MCP` | use-case-scoped SAS MCP | `ghcr.io/raedaldweik/sas_use_case` image, port 8134 |
 | `TomTom Maps MCP` | TomTom maps/traffic | tomtom mcp image |

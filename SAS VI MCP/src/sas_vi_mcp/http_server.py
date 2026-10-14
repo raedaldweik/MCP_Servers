@@ -30,6 +30,8 @@ async def health_check(request):
         "service": "sas-vi-mcp",
         "vi_endpoint_configured": bool(config.VI_ENDPOINT),
         "credentials_configured": config.configured(),
+        "auth_mode": config.auth_mode(),
+        "client_id": config.VI_CLIENT_ID,
         "write_actions_enabled": config.VI_ALLOW_ACTIONS,
     })
 

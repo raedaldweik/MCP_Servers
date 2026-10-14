@@ -6,4 +6,4 @@ OpenAPI specs in ``api-specs/``) as MCP tools for alert triage, entity
 investigation, free-text search, network expansion and workflow handling.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"

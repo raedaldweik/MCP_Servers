@@ -17,6 +17,7 @@ def register(mcp: FastMCP) -> None:
         return {
             "environment": config.VI_ENDPOINT or "(not configured)",
             "configured": config.configured(),
+            "authMode": config.auth_mode(),
             "useCase": config.VI_USE_CASE,
             "writeActionsEnabled": config.VI_ALLOW_ACTIONS,
             "capabilities": {
@@ -51,6 +52,13 @@ def register(mcp: FastMCP) -> None:
                     "fix": "Set VI_ENDPOINT in the RAM template environment "
                            "variables (the VI base URL or the current "
                            "cloudflared tunnel URL)."}
+        if config.auth_mode() == "none":
+            return {"ok": False, "endpoint": config.VI_ENDPOINT,
+                    "problem": "No credentials are configured",
+                    "fix": "Set VI_REFRESH_TOKEN (run `vi-get-refresh-token` "
+                           "once to obtain it) in the RAM template environment "
+                           "variables, or VI_USERNAME and VI_PASSWORD for a "
+                           "local account."}
         checks = {}
         overall = True
         for service, path in (("alert", "/"), ("sand", "/")):
@@ -64,5 +72,7 @@ def register(mcp: FastMCP) -> None:
                 checks[service] = str(exc)[:200]
                 overall = False
         return {"ok": overall, "endpoint": config.VI_ENDPOINT,
+                "authMode": config.auth_mode(),
+                "clientId": config.VI_CLIENT_ID,
                 "services": checks,
                 "writeActionsEnabled": config.VI_ALLOW_ACTIONS}
