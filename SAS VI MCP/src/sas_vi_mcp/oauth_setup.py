@@ -75,11 +75,13 @@ def pkce_pair() -> tuple[str, str]:
 def authorize_url(endpoint: str, client_id: str, challenge: str, state: str,
                   redirect_uri: str | None = None) -> str:
     """Build the SAS Logon authorization URL. Without ``redirect_uri`` SAS
-    Logon displays the code on a page instead of redirecting."""
+    Logon displays the code on a page instead of redirecting. No ``scope``
+    is requested, so SAS Logon grants the client's own scopes — this works
+    for any client (sas.cli, vscode, a registered one) instead of failing
+    with invalid_scope on a client that lacks ``openid``."""
     params = {
         "response_type": "code",
         "client_id": client_id,
-        "scope": "openid",
         "state": state,
         "code_challenge": challenge,
         "code_challenge_method": "S256",

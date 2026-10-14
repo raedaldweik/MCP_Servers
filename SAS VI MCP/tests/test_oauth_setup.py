@@ -61,6 +61,7 @@ def test_authorize_url_code_on_page_omits_redirect():
     assert q["code_challenge_method"] == ["S256"]
     assert q["state"] == ["ST"]
     assert "redirect_uri" not in q
+    assert "scope" not in q  # let SAS Logon grant the client's own scopes
 
 
 def test_authorize_url_with_localhost_callback():

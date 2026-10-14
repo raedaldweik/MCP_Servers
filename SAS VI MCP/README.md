@@ -226,6 +226,7 @@ the grant in use, per-service reachability, and pinpoints config problems
 | `sign-in failed (400/401) using the refresh_token grant` | The token expired or was revoked, or `VI_CLIENT_ID` is not the client it was issued to. Re-run `vi-get-refresh-token`, update `VI_REFRESH_TOKEN` (and `VI_CLIENT_ID`) in the template, restart the tool. The helper prints each token's expiry date. |
 | `Could not reach SAS Logon at …` | The cloudflared quick tunnel restarted with a new URL — update `VI_ENDPOINT`. |
 | `SAS Logon returned no refresh token for client …` | That client lacks the `refresh_token` grant. Use `sas.cli`, or register one with `vi-register-client`. |
+| SAS Logon rejects the sign-in URL for `sas.cli` (`unauthorized_client` / `invalid_client`) | That deployment's `sas.cli` has no authorization-code grant. Use the other built-in client: `--client-id vscode` (Viya 2022.11+), and set `VI_CLIENT_ID=vscode` in RAM — or register a dedicated client. |
 | `--callback-port` login never redirects back | SAS Logon's `form-action` Content-Security-Policy blocks localhost redirects. Drop `--callback-port` and use the default code-on-page flow (no CSP change needed). |
 | `vi-register-client`: admin sign-in fails | The prompt uses the password grant, which SSO accounts cannot use. Pass `--admin-token` (a bearer token from `sas-viya auth` or the environment's Consul token). |
 | `sign-in failed … using the password grant` | SSO/federated users cannot use `VI_USERNAME`/`VI_PASSWORD`; switch to a refresh token. |
